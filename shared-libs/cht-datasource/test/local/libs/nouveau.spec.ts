@@ -31,7 +31,14 @@ describe('nouveau', () => {
 
     ([
       ['key:value', 'exact_match:"key:value"'],
-      ['searchterm', 'searchterm*']
+      ['searchterm', 'searchterm*'],
+      ['12346', '(12346* OR १२३४६*)'],
+      ['१२३४६', '(१२३४६* OR 12346*)'],
+      ['0123', '(0123* OR ०१२३*)'],
+      ['०१२३', '(०१२३* OR 0123*)'],
+      ['9999999999', '(9999999999* OR ९९९९९९९९९९*)'],
+      ['1२3४', '(1२3४* OR 1234* OR १२३४*)'],
+      ['१2३4', '(१2३4* OR 1234* OR १२३४*)'],
     ] as [string, string][]).forEach(([freetext, q]) => {
       it('should query for freetext qualifier', async () => {
         const qualifier = Qualifier.byFreetext(freetext);
@@ -54,8 +61,38 @@ describe('nouveau', () => {
     });
 
     ([
+      ['(123)', ['123', '१२३']],
+      ['123-456', ['123-456', '१२३-४५६']],
+      ['123.456', ['123.456', '१२३.४५६']],
+      ['+9779800', ['+9779800', '+९७७९८००']],
+    ] as [string, string[]][]).forEach(([freetext, expectedTokens]) => {
+      it(`should normalize numerals with special characters [${freetext}]`, async () => {
+        const qualifier = Qualifier.byFreetext(freetext);
+        dbFetch.resolves(mockResponse);
+
+        await queryByFreetext(db, 'reports_by_freetext')(qualifier, null, 10);
+
+        const callArgs = dbFetch.getCall(0).args[1];
+        const body = JSON.parse(callArgs.body);
+        const escapeForNouveau = (token: string) => token.replace(/([+!(){}[\]^"~*?:\\/|-]|&&|\|\|)/g, '\\$1');
+        expectedTokens.forEach((token) => {
+          const escapedToken = escapeForNouveau(token);
+          const includesRawOrEscaped = [token, escapedToken].some((value) => body.q.includes(value));
+          expect(includesRawOrEscaped).to.equal(true);
+        });
+      });
+    });
+
+    ([
       ['key:value', 'contact_type:"person" AND exact_match:"key:value"'],
-      ['searchterm', 'contact_type:"person" AND searchterm*']
+      ['searchterm', 'contact_type:"person" AND searchterm*'],
+      ['12346', 'contact_type:"person" AND (12346* OR १२३४६*)'],
+      ['१२३४६', 'contact_type:"person" AND (१२३४६* OR 12346*)'],
+      ['0123', 'contact_type:"person" AND (0123* OR ०१२३*)'],
+      ['०१२३', 'contact_type:"person" AND (०१२३* OR 0123*)'],
+      ['9999999999', 'contact_type:"person" AND (9999999999* OR ९९९९९९९९९९*)'],
+      ['1२3४', 'contact_type:"person" AND (1२3४* OR 1234* OR १२३४*)'],
+      ['१2३4', 'contact_type:"person" AND (१2३4* OR 1234* OR १२३४*)'],
     ] as [string, string][]).forEach(([freetext, q]) => {
       it('should query with contact type and freetext qualifier', async () => {
         const qualifier = Qualifier.and(
@@ -79,7 +116,6 @@ describe('nouveau', () => {
         )).to.be.true;
       });
     });
-
 
     it('should return next cursor when data fills limit and bookmark changes', async () => {
       const qualifier = Qualifier.byFreetext('searchterm');

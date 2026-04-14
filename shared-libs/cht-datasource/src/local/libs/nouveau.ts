@@ -11,6 +11,30 @@ import { getDocById } from './doc';
 
 const MEDIC_NOUVEAU_PATH = '_design/medic/_nouveau';
 const jsonContentTypeHeaders = new Headers({ 'Content-Type': 'application/json' });
+const DEVANAGARI_TO_LATIN_DIGITS: Record<string, string> = {
+  '०': '0',
+  '१': '1',
+  '२': '2',
+  '३': '3',
+  '४': '4',
+  '५': '5',
+  '६': '6',
+  '७': '7',
+  '८': '8',
+  '९': '9',
+};
+const LATIN_TO_DEVANAGARI_DIGITS: Record<string, string> = {
+  '0': '०',
+  '1': '१',
+  '2': '२',
+  '3': '३',
+  '4': '४',
+  '5': '५',
+  '6': '६',
+  '7': '७',
+  '8': '८',
+  '9': '९',
+};
 const SORT_BY_VIEW: Record<string, string> = {
   'contacts_by_freetext': 'sort_order',
   'reports_by_freetext': 'reported_date',
@@ -31,12 +55,28 @@ const fetchWithDb = (
   // @ts-expect-error
 ) => db.fetch(url, opts);
 
+const normalizeDigitsToLatin = (value: string): string => value
+  .replace(/[०-९]/g, digit => DEVANAGARI_TO_LATIN_DIGITS[digit] ?? digit);
+
+const normalizeDigitsToDevanagari = (value: string): string => value
+  .replace(/[0-9]/g, digit => LATIN_TO_DEVANAGARI_DIGITS[digit] ?? digit);
+
+const getFreetextVariants = (value: string): string[] => (
+  [...new Set([ value, normalizeDigitsToLatin(value), normalizeDigitsToDevanagari(value) ])]
+);
+
 const getQueryByFreetext = (qualifier: FreetextQualifier) => {
-  if (isKeyedFreetextQualifier(qualifier)) {
-    return `exact_match:"${qualifier.freetext}"`;
+  const variants = getFreetextVariants(qualifier.freetext);
+  const getQueryForVariant = isKeyedFreetextQualifier(qualifier)
+    ? (variant: string) => `exact_match:"${variant}"`
+    : (variant: string) => `${escapeKeys(variant)}*`;
+  const queries = variants.map(getQueryForVariant);
+
+  if (queries.length === 1) {
+    return queries[0];
   }
-  // Fuzzy match
-  return `${escapeKeys(qualifier.freetext)}*`;
+  // return a single query with OR between the variants
+  return `(${queries.join(' OR ')})`;
 };
 
 const getQueryByTypeFreetext = (qualifier: FreetextQualifier & Partial<ContactTypeQualifier>) => {
